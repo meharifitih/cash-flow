@@ -94,14 +94,29 @@ This project follows **Hexagonal Architecture** (Ports and Adapters) principles 
 
 ## Quick Start
 
+### Prerequisites
+
+- Docker and Docker Compose (for containerized setup)
+- Go 1.21+ (for local development)
+- PostgreSQL 15+ (if running database locally)
+- RabbitMQ 3+ (if running messaging locally)
+
 ### Using Docker Compose (Recommended)
 
-1. Clone the repository and navigate to the project directory:
+This is the easiest way to run the entire application stack.
+
+1. **Clone the repository and navigate to the project directory:**
 ```bash
 cd Cashflow
 ```
 
-2. Start all services:
+2. **Copy environment file (optional, defaults are already set):**
+```bash
+cp .env.example .env
+# Edit .env if you need to change default values
+```
+
+3. **Start all services:**
 ```bash
 docker-compose up -d
 ```
@@ -112,14 +127,29 @@ This will start:
 - API server on port 8080
 - 1 worker instance
 
-To run multiple workers for concurrency testing:
+4. **Check service status:**
+```bash
+docker-compose ps
+```
+
+5. **View logs:**
+```bash
+# All services
+docker-compose logs -f
+
+# Specific service
+docker-compose logs -f api
+docker-compose logs -f worker
+```
+
+6. **Run multiple workers for concurrency testing:**
 ```bash
 docker-compose up -d --scale worker=2
 ```
 
-3. Wait for services to be healthy (about 10-15 seconds)
+7. **Wait for services to be healthy (about 10-15 seconds)**
 
-4. Test the API:
+8. **Test the API:**
 ```bash
 # Create a payment
 curl -X POST http://localhost:8080/api/v1/payments \
@@ -130,41 +160,184 @@ curl -X POST http://localhost:8080/api/v1/payments \
     "reference": "REF-001"
   }'
 
-# Get payment status
+# Get payment status (replace {payment-id} with actual ID from response)
 curl http://localhost:8080/api/v1/payments/{payment-id}
+
+# Health check
+curl http://localhost:8080/health
+```
+
+9. **Stop services:**
+```bash
+docker-compose down
+```
+
+10. **Stop and remove volumes (clean database):**
+```bash
+docker-compose down -v
 ```
 
 ### Local Development
 
-1. Start infrastructure services:
+For development without Docker containers.
+
+#### Step 1: Start Infrastructure Services
+
+Start only PostgreSQL and RabbitMQ using Docker:
 ```bash
 docker-compose up -d postgres rabbitmq
 ```
 
-2. Run database migrations:
+Or run them locally if you have them installed.
+
+#### Step 2: Setup Environment Variables
+
+Copy the example environment file:
 ```bash
-# Connect to PostgreSQL and run migrations
-psql -h localhost -U postgres -d payments -f migrations/001_create_payments_table.sql
+cp .env.example .env
 ```
 
-3. Download dependencies:
+Edit `.env` with your local configuration:
+```bash
+# .env
+DATABASE_URL=postgres://postgres:postgres@localhost:5432/payments?sslmode=disable
+RABBITMQ_URL=amqp://guest:guest@localhost:5672/
+PORT=8080
+ENV=development
+```
+
+#### Step 3: Run Database Migrations
+
+The application uses GORM auto-migration, but you can also run the SQL migration manually:
+```bash
+# Using psql
+psql -h localhost -U postgres -d payments -f migrations/001_create_payments_table.sql
+
+# Or connect to PostgreSQL and run manually
+psql -h localhost -U postgres -d payments
+```
+
+#### Step 4: Download Dependencies
+
 ```bash
 go mod download
 ```
 
-4. Run the API server:
+#### Step 5: Run the API Server
+
+**Option A: Using environment variables from .env file**
+
+Install a package to load .env (if not already using one):
+```bash
+go get github.com/joho/godotenv
+```
+
+Or run with explicit environment variables:
 ```bash
 export DATABASE_URL="postgres://postgres:postgres@localhost:5432/payments?sslmode=disable"
 export RABBITMQ_URL="amqp://guest:guest@localhost:5672/"
+export PORT=8080
 go run cmd/api/main.go
 ```
 
-5. Run the worker (in a separate terminal):
+**Option B: Using environment variables directly**
+```bash
+DATABASE_URL="postgres://postgres:postgres@localhost:5432/payments?sslmode=disable" \
+RABBITMQ_URL="amqp://guest:guest@localhost:5672/" \
+PORT=8080 \
+go run cmd/api/main.go
+```
+
+The API server will start on `http://localhost:8080`
+
+#### Step 6: Run the Worker (in a separate terminal)
+
 ```bash
 export DATABASE_URL="postgres://postgres:postgres@localhost:5432/payments?sslmode=disable"
 export RABBITMQ_URL="amqp://guest:guest@localhost:5672/"
 go run cmd/worker/main.go
 ```
+
+Or using inline environment variables:
+```bash
+DATABASE_URL="postgres://postgres:postgres@localhost:5432/payments?sslmode=disable" \
+RABBITMQ_URL="amqp://guest:guest@localhost:5672/" \
+go run cmd/worker/main.go
+```
+
+#### Step 7: Build and Run (Production-like)
+
+Build the binaries:
+```bash
+# Build API
+go build -o bin/api cmd/api/main.go
+
+# Build Worker
+go build -o bin/worker cmd/worker/main.go
+```
+
+Run the binaries:
+```bash
+# Terminal 1: API
+./bin/api
+
+# Terminal 2: Worker
+./bin/worker
+```
+
+### Running with Makefile (Optional)
+
+If you prefer using Make commands, you can create a `Makefile`:
+
+```makefile
+.PHONY: run-api run-worker build clean
+
+run-api:
+	@go run cmd/api/main.go
+
+run-worker:
+	@go run cmd/worker/main.go
+
+build:
+	@go build -o bin/api cmd/api/main.go
+	@go build -o bin/worker cmd/worker/main.go
+
+clean:
+	@rm -rf bin/
+```
+
+Then run:
+```bash
+make run-api    # Run API server
+make run-worker # Run worker
+make build      # Build binaries
+```
+
+### Development Workflow
+
+1. **Start infrastructure:**
+   ```bash
+   docker-compose up -d postgres rabbitmq
+   ```
+
+2. **Run API in development mode:**
+   ```bash
+   go run cmd/api/main.go
+   ```
+
+3. **Run worker in development mode (separate terminal):**
+   ```bash
+   go run cmd/worker/main.go
+   ```
+
+4. **Make changes and restart** (Go's fast compilation makes this quick)
+
+5. **Test your changes:**
+   ```bash
+   curl -X POST http://localhost:8080/api/v1/payments \
+     -H "Content-Type: application/json" \
+     -d '{"amount": 50.00, "currency": "ETB", "reference": "TEST-001"}'
+   ```
 
 ## API Endpoints
 
